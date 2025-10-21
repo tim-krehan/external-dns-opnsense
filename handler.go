@@ -11,7 +11,7 @@ func recordsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	records := listEntries()
+	records := cfg.listEntries()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(records)
@@ -30,11 +30,11 @@ func applyChangesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, rec := range req.Create {
-		createEntry(rec)
+		cfg.createEntry(rec)
 	}
 
 	for _, rec := range req.Delete {
-		deleteEntry(rec)
+		cfg.deleteEntry(rec)
 	}
 
 	w.WriteHeader(http.StatusOK)
