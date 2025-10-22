@@ -1,18 +1,24 @@
 package main
 
 import (
+	opnsense "external-dns-opnsense/opnsense"
 	"log"
 	"net/http"
 )
 
-var cfg OpnSenseConfig
+// Global variable to hold the OpnSense configuration
+var api opnsense.OpnSenseApi
 
 func main() {
-	http.HandleFunc("/records", recordsHandler)
-	http.HandleFunc("/applychanges", applyChangesHandler)
+	// Register HTTP handlers for the webhook server
+	http.HandleFunc("/", negotiateHandler)                      // Handles negotiation requests
+	http.HandleFunc("/records", recordsHandler)                 // Handles requests to retrieve or edit DNS records
+	http.HandleFunc("/adjustendpoints", adjustendpointsHandler) // Handles requests to adjust DNS endpoints
 
-	cfg = LoadConfigFromEnv()
+	// Load the OpnSense configuration from environment variables
+	api = opnsense.LoadConfigFromEnv()
 
-	log.Println("Webhook server listening on :30000")
-	log.Fatal(http.ListenAndServe(":30000", nil))
+	// Start the webhook server on port 8888
+	log.Println("Webhook server listening on :8888")
+	log.Fatal(http.ListenAndServe("localhost:8888", nil)) // Log fatal errors if the server fails to start
 }
