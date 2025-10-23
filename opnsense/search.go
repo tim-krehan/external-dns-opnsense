@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-func SearchHostOverrides(api *OpnSenseApi, searchPhrase string) ([]OpnSenseHostOverride, error) {
+func SearchHostOverrides(api *OpnSenseApi, searchPhrase string) ([]*OpnSenseHostOverride, error) {
 	body := map[string]interface{}{
 		"current":      1,
 		"rowCount":     -1,
@@ -26,7 +26,7 @@ func SearchHostOverrides(api *OpnSenseApi, searchPhrase string) ([]OpnSenseHostO
 	defer resp.Body.Close()
 
 	var searchResponse struct {
-		Rows     []OpnSenseHostOverride `json:"rows"`
+		Rows     []*OpnSenseHostOverride `json:"rows"`
 		RowCount int                    `json:"rowCount"`
 		Total    int                    `json:"total"`
 		Current  int                    `json:"current"`

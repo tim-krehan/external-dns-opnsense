@@ -18,7 +18,7 @@ import (
 
 // LoadConfigFromEnv loads the API configuration from environment variables.
 // It ensures that all required configuration parameters are present.
-func LoadConfigFromEnv() OpnSenseApi {
+func LoadConfigFromEnv() *OpnSenseApi {
 	_ = godotenv.Load()
 
 	apiKey := os.Getenv("OPNSENSE_API_KEY")
@@ -57,7 +57,7 @@ func LoadConfigFromEnv() OpnSenseApi {
 	log.Printf("Using OpnSense API Host: %s", apiHost)
 	log.Printf("With Timeout: %s", timeout.String())
 
-	return OpnSenseApi{
+	api := OpnSenseApi{
 		Ctx:             context.Background(),
 		APIKey:          apiKey,
 		APISecret:       apiSecret,
@@ -65,11 +65,12 @@ func LoadConfigFromEnv() OpnSenseApi {
 		ApiTimeout:      timeout,
 		DNSDomainFilter: domainFilter,
 	}
+	return &api
 }
 
 // ApiRequest performs an HTTP request to the OpnSense API with the specified method, endpoint, and body.
 // It handles context management and adds the required authentication headers.
-func (api OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*http.Response, error) {
+func (api *OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*http.Response, error) {
 	ctx := api.Ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -116,12 +117,12 @@ func (api OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*htt
 }
 
 // WithContext creates a copy of the OpnSenseApi with the specified context.
-func (api OpnSenseApi) WithContext(ctx context.Context) OpnSenseApi {
+func (api *OpnSenseApi) WithContext(ctx context.Context) *OpnSenseApi {
 	api.Ctx = ctx
 	return api
 }
 
-func (api OpnSenseApi) ApplyChanges() error {
+func (api *OpnSenseApi) ApplyChanges() error {
 	var applyResponse struct {
 		Status string `json:"status"`
 	}

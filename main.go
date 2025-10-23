@@ -7,7 +7,7 @@ import (
 )
 
 // Global variable to hold the OpnSense configuration
-var api opnsense.OpnSenseApi
+var api *opnsense.OpnSenseApi
 
 func main() {
 	// Register HTTP handlers for the webhook server
