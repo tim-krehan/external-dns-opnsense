@@ -38,7 +38,7 @@ func (cfg OpnSenseApi) ListEntries() []externaldns.Record {
 	if err != nil {
 		log.Fatalf("Failed to marshal request body: %v", err)
 	}
-	resp, err := cfg.ApiRequest(http.MethodPost, "/unbound/search_host_override/", bytes.NewReader(jsonBody))
+	resp, err := cfg.ApiRequest(http.MethodPost, "/unbound/settings/search_host_override/", bytes.NewReader(jsonBody))
 	if err != nil {
 		log.Printf("Error reading response body: %v", err)
 		return []externaldns.Record{}
@@ -62,16 +62,32 @@ func (cfg OpnSenseApi) ListEntries() []externaldns.Record {
 	}
 	records := []externaldns.Record{}
 	for _, r := range overrides.Rows {
-		ttl, err := strconv.ParseInt(r.TTL, 10, 64)
-		if err != nil {
-			log.Printf("Error converting TTL to int: %v", err)
-			continue
+		ttl := int64(0)
+		targets := []string{}
+		if r.TTL != "" {
+			ttl, err = strconv.ParseInt(r.TTL, 10, 64)
+			if err != nil {
+				log.Printf("Error converting TTL to int: %v", err)
+				continue
+			}
 		}
+		switch r.Type {
+		case "A":
+			targets = append(targets, r.Server)
+		case "AAAA":
+			targets = append(targets, r.Server)
+		case "MX":
+			targets = append(targets, r.Mx)
+		case "TXT":
+			targets = append(targets, r.TxtData)
+		default:
+		}
+
 		records = append(records, externaldns.Record{
 			DNSName:    r.HostName + "." + r.Domain,
 			RecordType: r.Type,
 			TTL:        ttl,
-			Targets:    []string{},
+			Targets:    targets,
 		})
 	}
 	return records
