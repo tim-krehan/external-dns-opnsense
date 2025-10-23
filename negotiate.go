@@ -1,8 +1,8 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -14,11 +14,21 @@ func negotiateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
-	defer cancel()
-	records := ReadEntries(api.WithContext(ctx), "")
+	log.Printf("Negotiating configuration state")
+
+	config := struct {
+		DomainFilter struct {
+			Domains []string `json:"domains"`
+		} `json:"DomainFilter"`
+	}{
+		DomainFilter: struct {
+			Domains []string `json:"domains"`
+		}{
+			Domains: api.DNSDomainFilter,
+		},
+	}
 
 	// Set the response content type to JSON and encode the state into the response.
 	w.Header().Set("Content-Type", "application/external.dns.webhook+json;version=1")
-	json.NewEncoder(w).Encode(records)
+	json.NewEncoder(w).Encode(config)
 }

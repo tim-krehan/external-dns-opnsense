@@ -117,15 +117,13 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 	log.Printf("List: Retrieved %d records\n", len(endpoints))
 	endpoints = MergeRecordsWithSameFQDN(endpoints)
 	if err != nil {
-		log.Printf("List: Error merging records: %v\n", err)
+		log.Printf("Error merging records: %v\n", err)
 		return []*endpoint.Endpoint{}
 	}
 	return endpoints
 }
 
 func CreateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
-	// Implementation to create a DNS entry in OpnSense based on the endpoint details.
-	// This is a placeholder and should be replaced with actual API calls to create the record.
 	log.Printf("Creating entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
 	hostname := strings.Split(ep.DNSName, ".")[0]
 	domain := strings.Join(strings.Split(ep.DNSName, ".")[1:], ".")
@@ -138,30 +136,39 @@ func CreateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 		Description: "Created by external-dns",
 	}
 
-	// assign target here
-	return nil
-
-	ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
-	defer cancel()
-	err := override.Create(api.WithContext(ctx))
-	if err != nil {
-		log.Printf("CreateEntry: Error creating host override: %v\n", err)
-		return err
+	for _, target := range ep.Targets {
+		switch ep.RecordType {
+		case endpoint.RecordTypeA:
+			override.Server = target
+		case endpoint.RecordTypeAAAA:
+			override.Server = target
+		case endpoint.RecordTypePTR:
+			override.Server = target
+		default:
+			log.Printf("Record %s is not supported", ep.RecordType)
+		}
 	}
+
+	// ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
+	// defer cancel()
+	log.Printf("CreateEntry: Creating host override: %+v\n", override)
+	// err := override.Create(api.WithContext(ctx))
+	// if err != nil {
+	// log.Printf("CreateEntry: Error creating host override: %v\n", err)
+	// return err
+	// }
 	return nil
 }
 
 func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
-	// Implementation to update a DNS entry in OpnSense based on the endpoint details.
-	// This is a placeholder and should be replaced with actual API calls to update the record.
 	log.Printf("Updating entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
+
 	return nil
 }
 
 func DeleteEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
-	// Implementation to delete a DNS entry in OpnSense based on the endpoint details.
-	// This is a placeholder and should be replaced with actual API calls to delete the record.
 	log.Printf("Deleting entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
+
 	return nil
 }
 
