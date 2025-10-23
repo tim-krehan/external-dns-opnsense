@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	externaldns "external-dns-opnsense/externaldns"
 	"net/http"
@@ -29,10 +30,14 @@ func recordsHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		http.Error(w, "POST not implemented", http.StatusNotImplemented)
 	case http.MethodGet:
-		// Retrieve the list of DNS records from the configuration.
-		records := api.ListEntries()
+		// Create a new context for this request
+		ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
+		defer cancel()
 
-		// Set the response content type to JSON and encode the records into the response.
+		// Retrieve the list of DNS records using the new context
+		records := api.WithContext(ctx).ListEntries()
+
+		// Set the response content type to JSON and encode the records into the response
 		w.Header().Set("Content-Type", "application/external.dns.webhook+json;version=1")
 		json.NewEncoder(w).Encode(records)
 	}
@@ -46,6 +51,10 @@ func adjustendpointsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create a new context for this request
+	ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
+	defer cancel()
+
 	// Decode the JSON request body into an ApplyChangesRequest struct.
 	var req externaldns.ApplyChangesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -55,12 +64,12 @@ func adjustendpointsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Process the create operations.
 	for _, rec := range req.Create {
-		api.CreateEntry(rec)
+		api.WithContext(ctx).CreateEntry(rec)
 	}
 
 	// Process the delete operations.
 	for _, rec := range req.Delete {
-		api.DeleteEntry(rec)
+		api.WithContext(ctx).DeleteEntry(rec)
 	}
 
 	w.Header().Set("Content-Type", "application/external.dns.webhook+json;version=1")

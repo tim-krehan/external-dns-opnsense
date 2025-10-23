@@ -40,10 +40,11 @@ func (cfg OpnSenseApi) ListEntries() []externaldns.Record {
 	}
 	resp, err := cfg.ApiRequest(http.MethodPost, "/unbound/settings/search_host_override/", bytes.NewReader(jsonBody))
 	if err != nil {
-		log.Printf("Error reading response body: %v", err)
+		log.Printf("Error making API request: %v", err)
 		return []externaldns.Record{}
 	}
 	defer resp.Body.Close()
+
 	var overrides struct {
 		Rows     []OpnSenseHostOverride `json:"rows"`
 		RowCount int                    `json:"rowCount"`
@@ -90,5 +91,6 @@ func (cfg OpnSenseApi) ListEntries() []externaldns.Record {
 			Targets:    targets,
 		})
 	}
+	log.Printf("List: Retrieved %d records\n", len(records))
 	return records
 }

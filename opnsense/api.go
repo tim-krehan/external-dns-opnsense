@@ -16,10 +16,11 @@ import (
 
 // OpnSenseApi represents the API configuration for interacting with the OpnSense API.
 type OpnSenseApi struct {
-	Ctx       context.Context
-	APIKey    string
-	APISecret string
-	APIHost   string
+	Ctx        context.Context
+	APIKey     string
+	APISecret  string
+	APIHost    string
+	ApiTimeout time.Duration
 }
 
 // LoadConfigFromEnv loads the API configuration from environment variables.
@@ -30,6 +31,7 @@ func LoadConfigFromEnv() OpnSenseApi {
 	apiKey := os.Getenv("OPNSENSE_API_KEY")
 	apiSecret := os.Getenv("OPNSENSE_API_SECRET")
 	apiHost := os.Getenv("OPNSENSE_API_HOST")
+	envApiTimeout := os.Getenv("OPNSENSE_API_TIMEOUT")
 
 	missingConfig := false
 	missingConfigParams := []string{}
@@ -49,11 +51,24 @@ func LoadConfigFromEnv() OpnSenseApi {
 		log.Fatalf("Missing required configuration parameters: %v", missingConfigParams)
 	}
 
+	timeout := 30 * time.Second
+	if timeoutStr := envApiTimeout; timeoutStr != "" {
+		if parsedTimeout, err := time.ParseDuration(timeoutStr); err == nil {
+			timeout = parsedTimeout
+		} else {
+			log.Printf("Invalid timeout value '%s', using default of 30s", timeoutStr)
+		}
+	}
+
+	log.Printf("Using OpnSense API Host: %s", apiHost)
+	log.Printf("With Timeout: %s", timeout.String())
+
 	return OpnSenseApi{
-		Ctx:       context.Background(),
-		APIKey:    apiKey,
-		APISecret: apiSecret,
-		APIHost:   apiHost,
+		Ctx:        context.Background(),
+		APIKey:     apiKey,
+		APISecret:  apiSecret,
+		APIHost:    apiHost,
+		ApiTimeout: timeout,
 	}
 }
 
@@ -64,10 +79,9 @@ func (cfg OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*htt
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, cfg.ApiTimeout)
 		defer cancel()
 	}
 
@@ -91,13 +105,23 @@ func (cfg OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*htt
 	}
 
 	client := &http.Client{
-		Timeout: 0,
+		Timeout: cfg.ApiTimeout, // Match the client timeout to the context timeout
 	}
 
 	resp, err := client.Do(req)
+
 	if err != nil {
+		if ctx.Err() != nil {
+			log.Printf("Request to %s failed due to context error: %v", u.String(), ctx.Err())
+		}
 		return nil, err
 	}
 
 	return resp, nil
+}
+
+// WithContext creates a copy of the OpnSenseApi with the specified context.
+func (cfg OpnSenseApi) WithContext(ctx context.Context) OpnSenseApi {
+	cfg.Ctx = ctx
+	return cfg
 }
