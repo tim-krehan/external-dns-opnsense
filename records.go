@@ -111,7 +111,7 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 			RecordTTL:  endpoint.TTL(ttl),
 			ProviderSpecific: endpoint.ProviderSpecific{endpoint.ProviderSpecificProperty{
 				Name:  "uuid",
-				Value: r.Uuid,
+				Value: r.HostName + "." + r.Domain + "," + r.Uuid,
 			}},
 			Labels: map[string]string{
 				"owner": ownerId,
@@ -149,24 +149,76 @@ func CreateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 			override.Server = target
 		case endpoint.RecordTypePTR:
 			override.Server = target
+		case endpoint.RecordTypeTXT:
+			override.TxtData = target
 		default:
 			log.Printf("Record %s is not supported", ep.RecordType)
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
+		defer cancel()
+		log.Printf("CreateEntry: Creating host override: %+v\n", override)
+		err := override.Create(api.WithContext(ctx))
+		if err != nil {
+			log.Printf("CreateEntry: Error creating host override: %v\n", err)
+			return err
+		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
-	defer cancel()
-	log.Printf("CreateEntry: Creating host override: %+v\n", override)
-	err := override.Create(api.WithContext(ctx))
-	if err != nil {
-		log.Printf("CreateEntry: Error creating host override: %v\n", err)
-		return err
-	}
 	return nil
 }
 
 func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	log.Printf("Updating entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
+	var uuids []string
+	hostname := strings.Split(ep.DNSName, ".")[0]
+	domain := strings.Join(strings.Split(ep.DNSName, ".")[1:], ".")
+	for _, property := range ep.ProviderSpecific {
+		if property.Name == "uuid" {
+			uuids = strings.Split(property.Value, ",")
+			break
+		}
+	}
+	override := opnsense.OpnSenseHostOverride{
+		HostName:    hostname,
+		Domain:      domain,
+		Type:        ep.RecordType,
+		TTL:         strconv.FormatInt(int64(ep.RecordTTL), 10),
+		Enabled:     "1",
+		Description: RecordDescriptionPrefix + ep.Labels["owner"],
+	}
+
+	for _, target := range ep.Targets {
+		switch ep.RecordType {
+		case endpoint.RecordTypeA:
+			override.Server = target
+		case endpoint.RecordTypeAAAA:
+			override.Server = target
+		case endpoint.RecordTypePTR:
+			override.Server = target
+		case endpoint.RecordTypeTXT:
+			override.TxtData = target
+		default:
+			log.Printf("Record %s is not supported", ep.RecordType)
+		}
+		uuid := ""
+		for _, id := range uuids {
+			parts := strings.Split(id, ",")
+			fqdn := parts[0]
+			uuid = parts[1]
+			if fqdn == ep.DNSName {
+				override.Uuid = uuid
+				break
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
+		defer cancel()
+		log.Printf("UpdateEntry: Updating host override: %+v\n", override)
+		err := override.Update(api.WithContext(ctx))
+		if err != nil {
+			log.Printf("UpdateEntry: Error updating host override: %v\n", err)
+			return err
+		}
+	}
 
 	return nil
 }
@@ -187,6 +239,7 @@ func MergeRecordsWithSameFQDN(records []*endpoint.Endpoint) []*endpoint.Endpoint
 		key := record.DNSName + "|" + record.RecordType
 		if existingRecord, exists := recordMap[key]; exists {
 			existingRecord.Targets = append(existingRecord.Targets, record.Targets...)
+			existingRecord.ProviderSpecific[0].Value += ";" + record.ProviderSpecific[0].Value
 		} else {
 			recordMap[key] = record
 		}
