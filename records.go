@@ -16,8 +16,8 @@ import (
 
 const RecordDescriptionPrefix = "Created by external-dns - "
 
-// recordsHandler handles HTTP requests to retrieve DNS records.
-// Only POST requests are allowed. It responds with a JSON-encoded list of records.
+// recordsHandler handles HTTP requests to retrieve or apply DNS records.
+// Supports GET (list records) and POST (apply plan.Changes).
 func recordsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
@@ -30,7 +30,8 @@ func recordsHandler(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
 		defer cancel()
 		// Apply the changes using the new context
-		if err := ApplyChanges(api.WithContext(ctx), changes); err != nil {
+		errs := ApplyChanges(api.WithContext(ctx), changes)
+		if len(errs) > 0 {
 			http.Error(w, "Error applying changes", http.StatusInternalServerError)
 			return
 		}
@@ -89,8 +90,9 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 		if r.TTL != "" {
 			ttl, err = strconv.ParseInt(r.TTL, 10, 64)
 			if err != nil {
-				log.Printf("Error converting TTL to int: %v", err)
-				continue
+				// Do not drop the record on TTL parse error; log and use 0 as TTL
+				log.Printf("Error converting TTL to int for %s.%s: %v. Using TTL=0", r.HostName, r.Domain, err)
+				ttl = 0
 			}
 		}
 		switch r.Type {
@@ -121,10 +123,6 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 	}
 	log.Printf("List: Retrieved %d records\n", len(endpoints))
 	endpoints = MergeRecordsWithSameFQDN(endpoints)
-	if err != nil {
-		log.Printf("Error merging records: %v\n", err)
-		return []*endpoint.Endpoint{}
-	}
 	return endpoints
 }
 
@@ -225,6 +223,61 @@ func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 
 func DeleteEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	log.Printf("Deleting entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
+	var uuids []string
+	hostname := strings.Split(ep.DNSName, ".")[0]
+	domain := strings.Join(strings.Split(ep.DNSName, ".")[1:], ".")
+	for _, property := range ep.ProviderSpecific {
+		if property.Name == "uuid" {
+			uuids = strings.Split(property.Value, ",")
+			break
+		}
+	}
+	override := opnsense.OpnSenseHostOverride{
+		HostName:    hostname,
+		Domain:      domain,
+		Type:        ep.RecordType,
+		TTL:         strconv.FormatInt(int64(ep.RecordTTL), 10),
+		Enabled:     "1",
+		Description: RecordDescriptionPrefix + ep.Labels["owner"],
+	}
+
+	for _, target := range ep.Targets {
+		switch ep.RecordType {
+		case endpoint.RecordTypeA:
+			override.Server = target
+		case endpoint.RecordTypeAAAA:
+			override.Server = target
+		case endpoint.RecordTypePTR:
+			override.Server = target
+		case endpoint.RecordTypeTXT:
+			override.TxtData = target
+		default:
+			log.Printf("Record %s is not supported", ep.RecordType)
+		}
+
+		// find matching uuid for this fqdn
+		uuid := ""
+		for _, id := range uuids {
+			parts := strings.Split(id, ",")
+			if len(parts) >= 2 {
+				fqdn := parts[0]
+				uuid = parts[1]
+				if fqdn == ep.DNSName {
+					override.Uuid = uuid
+					break
+				}
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
+		defer cancel()
+		log.Printf("DeleteEntry: Deleting host override: %+v\n", override)
+		err := override.Delete(api.WithContext(ctx))
+		if err != nil {
+			log.Printf("DeleteEntry: Error deleting host override: %v\n", err)
+			return err
+		}
+	}
 
 	return nil
 }
@@ -238,10 +291,41 @@ func MergeRecordsWithSameFQDN(records []*endpoint.Endpoint) []*endpoint.Endpoint
 	for _, record := range records {
 		key := record.DNSName + "|" + record.RecordType
 		if existingRecord, exists := recordMap[key]; exists {
-			existingRecord.Targets = append(existingRecord.Targets, record.Targets...)
-			existingRecord.ProviderSpecific[0].Value += ";" + record.ProviderSpecific[0].Value
+			// merge targets with deduplication
+			targetSet := make(map[string]struct{})
+			for _, t := range existingRecord.Targets {
+				targetSet[t] = struct{}{}
+			}
+			for _, t := range record.Targets {
+				if _, ok := targetSet[t]; !ok {
+					existingRecord.Targets = append(existingRecord.Targets, t)
+					targetSet[t] = struct{}{}
+				}
+			}
+
+			// ensure ProviderSpecific exists
+			if len(existingRecord.ProviderSpecific) == 0 && len(record.ProviderSpecific) > 0 {
+				existingRecord.ProviderSpecific = append(existingRecord.ProviderSpecific, record.ProviderSpecific[0])
+			} else if len(existingRecord.ProviderSpecific) > 0 && len(record.ProviderSpecific) > 0 {
+				// append unique provider-specific value fragments (avoid duplicating identical fragments)
+				existingVals := strings.Split(existingRecord.ProviderSpecific[0].Value, ";")
+				newVals := strings.Split(record.ProviderSpecific[0].Value, ";")
+				valSet := make(map[string]struct{})
+				for _, v := range existingVals {
+					valSet[v] = struct{}{}
+				}
+				for _, v := range newVals {
+					if _, ok := valSet[v]; !ok {
+						existingVals = append(existingVals, v)
+						valSet[v] = struct{}{}
+					}
+				}
+				existingRecord.ProviderSpecific[0].Value = strings.Join(existingVals, ";")
+			}
 		} else {
-			recordMap[key] = record
+			// store a copy to avoid accidental shared-slice mutations
+			copied := *record
+			recordMap[key] = &copied
 		}
 	}
 
