@@ -27,5 +27,6 @@ type OpnSenseApi struct {
 	APISecret       string
 	APIHost         string
 	ApiTimeout      time.Duration
+	OwnerID         string
 	DNSDomainFilter []string
 }

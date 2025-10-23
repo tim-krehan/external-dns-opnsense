@@ -14,6 +14,8 @@ import (
 	"sigs.k8s.io/external-dns/plan"
 )
 
+const RecordDescriptionPrefix = "Created by external-dns - "
+
 // recordsHandler handles HTTP requests to retrieve DNS records.
 // Only POST requests are allowed. It responds with a JSON-encoded list of records.
 func recordsHandler(w http.ResponseWriter, r *http.Request) {
@@ -96,12 +98,12 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 			targets = append(targets, r.Server)
 		case "AAAA":
 			targets = append(targets, r.Server)
-		case "MX":
-			targets = append(targets, r.Mx)
 		case "TXT":
 			targets = append(targets, r.TxtData)
 		default:
 		}
+
+		ownerId := strings.Replace(r.Description, RecordDescriptionPrefix, "", 1)
 		endpoint := endpoint.Endpoint{
 			DNSName:    r.HostName + "." + r.Domain,
 			RecordType: r.Type,
@@ -111,6 +113,9 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 				Name:  "uuid",
 				Value: r.Uuid,
 			}},
+			Labels: map[string]string{
+				"owner": ownerId,
+			},
 		}
 		endpoints = append(endpoints, &endpoint)
 	}
@@ -133,7 +138,7 @@ func CreateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 		Type:        ep.RecordType,
 		TTL:         strconv.FormatInt(int64(ep.RecordTTL), 10),
 		Enabled:     "1",
-		Description: "Created by external-dns",
+		Description: RecordDescriptionPrefix + ep.Labels["owner"],
 	}
 
 	for _, target := range ep.Targets {
@@ -149,14 +154,14 @@ func CreateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 		}
 	}
 
-	// ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
-	// defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
+	defer cancel()
 	log.Printf("CreateEntry: Creating host override: %+v\n", override)
-	// err := override.Create(api.WithContext(ctx))
-	// if err != nil {
-	// log.Printf("CreateEntry: Error creating host override: %v\n", err)
-	// return err
-	// }
+	err := override.Create(api.WithContext(ctx))
+	if err != nil {
+		log.Printf("CreateEntry: Error creating host override: %v\n", err)
+		return err
+	}
 	return nil
 }
 

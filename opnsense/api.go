@@ -26,6 +26,7 @@ func LoadConfigFromEnv() *OpnSenseApi {
 	apiHost := os.Getenv("OPNSENSE_API_HOST")
 	envApiTimeout := os.Getenv("OPNSENSE_API_TIMEOUT")
 	domainFilter := strings.Split(os.Getenv("DOMAIN_FILTER"), ",")
+	ownerId := os.Getenv("EXTERNAL_DNS_OWNER")
 
 	missingConfig := false
 	missingConfigParams := []string{}
@@ -53,6 +54,10 @@ func LoadConfigFromEnv() *OpnSenseApi {
 			log.Printf("Invalid timeout value '%s', using default of 30s", timeoutStr)
 		}
 	}
+	if ownerId == "" {
+		log.Printf("EXTERNAL_DNS_OWNER not set, using default value 'default'")
+		ownerId = "default"
+	}
 
 	log.Printf("Using OpnSense API Host: %s", apiHost)
 	log.Printf("With Timeout: %s", timeout.String())
@@ -64,6 +69,7 @@ func LoadConfigFromEnv() *OpnSenseApi {
 		APIHost:         apiHost,
 		ApiTimeout:      timeout,
 		DNSDomainFilter: domainFilter,
+		OwnerID:         ownerId,
 	}
 	return &api
 }
