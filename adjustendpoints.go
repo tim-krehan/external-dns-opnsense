@@ -32,5 +32,7 @@ func AdjustEndpoints(api *opnsense.OpnSenseApi, endpoints []*endpoint.Endpoint) 
 	var createdEndpoints []*endpoint.Endpoint
 	var error error
 
+	// filter out CNAME Records
+
 	return createdEndpoints, error
 }

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	opnsense "external-dns-opnsense/opnsense"
 
@@ -126,6 +127,27 @@ func CreateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	// Implementation to create a DNS entry in OpnSense based on the endpoint details.
 	// This is a placeholder and should be replaced with actual API calls to create the record.
 	log.Printf("Creating entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
+	hostname := strings.Split(ep.DNSName, ".")[0]
+	domain := strings.Join(strings.Split(ep.DNSName, ".")[1:], ".")
+	override := opnsense.OpnSenseHostOverride{
+		HostName:    hostname,
+		Domain:      domain,
+		Type:        ep.RecordType,
+		TTL:         strconv.FormatInt(int64(ep.RecordTTL), 10),
+		Enabled:     "1",
+		Description: "Created by external-dns",
+	}
+
+	// assign target here
+	return nil
+
+	ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
+	defer cancel()
+	err := override.Create(api.WithContext(ctx))
+	if err != nil {
+		log.Printf("CreateEntry: Error creating host override: %v\n", err)
+		return err
+	}
 	return nil
 }
 
