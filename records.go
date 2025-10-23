@@ -101,12 +101,15 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 			targets = append(targets, r.TxtData)
 		default:
 		}
-
 		endpoint := endpoint.Endpoint{
 			DNSName:    r.HostName + "." + r.Domain,
 			RecordType: r.Type,
 			Targets:    targets,
 			RecordTTL:  endpoint.TTL(ttl),
+			ProviderSpecific: endpoint.ProviderSpecific{endpoint.ProviderSpecificProperty{
+				Name:  "uuid",
+				Value: r.Uuid,
+			}},
 		}
 		endpoints = append(endpoints, &endpoint)
 	}
