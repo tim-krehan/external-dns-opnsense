@@ -3,11 +3,13 @@ package opnsense
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 )
 
-func (override *OpnSenseHostOverride) Create(api *OpnSenseApi) error {
+func (override *OpnSenseHostOverride) Update(api *OpnSenseApi) error {
+	endpoint := fmt.Sprintf("/unbound/settings/set_host_override/%s", override.Uuid)
 	reqBody := struct {
 		Host *OpnSenseHostOverride `json:"host"`
 	}{
@@ -17,23 +19,21 @@ func (override *OpnSenseHostOverride) Create(api *OpnSenseApi) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("Create: Creating DNS entry [%s] %s => %s (TTL %s)\n", override.Type, override.HostName+"."+override.Domain, (override.Mx + override.Server + override.TxtData), override.TTL)
 
-	resp, err := api.ApiRequest(http.MethodPost, "/unbound/settings/add_host_override/", bytes.NewReader(jsonBody))
+	resp, err := api.ApiRequest(http.MethodPost, endpoint, bytes.NewReader(jsonBody))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Failed to create DNS entry, status code: %d", resp.StatusCode)
-		return ErrFailedToCreate
+		log.Printf("Failed to update DNS entry with UUID %s, status code: %d\n", override.Uuid, resp.StatusCode)
+		return ErrFailedToUpdate
 	}
 
 	// check if the response contains an error message
 	var apiResp struct {
 		Result string `json:"result"`
-		Uuid   string `json:"uuid"`
 	}
 	err = json.NewDecoder(resp.Body).Decode(&apiResp)
 	if err != nil {

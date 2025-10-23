@@ -3,25 +3,18 @@ package opnsense
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
 )
-
-// OpnSenseApi represents the API configuration for interacting with the OpnSense API.
-type OpnSenseApi struct {
-	Ctx        context.Context
-	APIKey     string
-	APISecret  string
-	APIHost    string
-	ApiTimeout time.Duration
-}
 
 // LoadConfigFromEnv loads the API configuration from environment variables.
 // It ensures that all required configuration parameters are present.
@@ -32,6 +25,7 @@ func LoadConfigFromEnv() OpnSenseApi {
 	apiSecret := os.Getenv("OPNSENSE_API_SECRET")
 	apiHost := os.Getenv("OPNSENSE_API_HOST")
 	envApiTimeout := os.Getenv("OPNSENSE_API_TIMEOUT")
+	domainFilter := strings.Split(os.Getenv("DOMAIN_FILTER"), ",")
 
 	missingConfig := false
 	missingConfigParams := []string{}
@@ -64,28 +58,29 @@ func LoadConfigFromEnv() OpnSenseApi {
 	log.Printf("With Timeout: %s", timeout.String())
 
 	return OpnSenseApi{
-		Ctx:        context.Background(),
-		APIKey:     apiKey,
-		APISecret:  apiSecret,
-		APIHost:    apiHost,
-		ApiTimeout: timeout,
+		Ctx:             context.Background(),
+		APIKey:          apiKey,
+		APISecret:       apiSecret,
+		APIHost:         apiHost,
+		ApiTimeout:      timeout,
+		DNSDomainFilter: domainFilter,
 	}
 }
 
 // ApiRequest performs an HTTP request to the OpnSense API with the specified method, endpoint, and body.
 // It handles context management and adds the required authentication headers.
-func (cfg OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*http.Response, error) {
-	ctx := cfg.Ctx
+func (api OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*http.Response, error) {
+	ctx := api.Ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, cfg.ApiTimeout)
+		ctx, cancel = context.WithTimeout(ctx, api.ApiTimeout)
 		defer cancel()
 	}
 
-	u, err := url.Parse(cfg.APIHost)
+	u, err := url.Parse(api.APIHost)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +92,7 @@ func (cfg OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*htt
 	}
 
 	// Add Basic Authentication header
-	auth := base64.StdEncoding.EncodeToString([]byte(cfg.APIKey + ":" + cfg.APISecret))
+	auth := base64.StdEncoding.EncodeToString([]byte(api.APIKey + ":" + api.APISecret))
 	req.Header.Set("Authorization", "Basic "+auth)
 
 	if body != nil {
@@ -105,7 +100,7 @@ func (cfg OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*htt
 	}
 
 	client := &http.Client{
-		Timeout: cfg.ApiTimeout, // Match the client timeout to the context timeout
+		Timeout: api.ApiTimeout, // Match the client timeout to the context timeout
 	}
 
 	resp, err := client.Do(req)
@@ -121,7 +116,35 @@ func (cfg OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*htt
 }
 
 // WithContext creates a copy of the OpnSenseApi with the specified context.
-func (cfg OpnSenseApi) WithContext(ctx context.Context) OpnSenseApi {
-	cfg.Ctx = ctx
-	return cfg
+func (api OpnSenseApi) WithContext(ctx context.Context) OpnSenseApi {
+	api.Ctx = ctx
+	return api
+}
+
+func (api OpnSenseApi) ApplyChanges() error {
+	var applyResponse struct {
+		Status string `json:"status"`
+	}
+	resp, err := api.ApiRequest(http.MethodPost, "/unbound/service/reconfigure", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&applyResponse)
+	if err != nil {
+		return err
+	}
+	if applyResponse.Status != "ok" {
+		log.Printf("API returned error during apply changes: %s", applyResponse.Status)
+		// return with error
+		return ErrFailedToApply
+	}
+
+	log.Printf("ApplyChanges: Successfull\n")
+	return nil
 }

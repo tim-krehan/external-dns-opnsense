@@ -14,6 +14,7 @@ func main() {
 	http.HandleFunc("/", negotiateHandler)                      // Handles negotiation requests
 	http.HandleFunc("/records", recordsHandler)                 // Handles requests to retrieve or edit DNS records
 	http.HandleFunc("/adjustendpoints", adjustendpointsHandler) // Handles requests to adjust DNS endpoints
+	http.HandleFunc("/healthz", healthzHandler)                 // Health check endpoint
 
 	// Load the OpnSense configuration from environment variables
 	api = opnsense.LoadConfigFromEnv()
