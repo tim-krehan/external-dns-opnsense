@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -125,8 +126,13 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 
 func CreateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	log.Printf("Creating entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
-	hostname := strings.Split(ep.DNSName, ".")[0]
-	domain := strings.Join(strings.Split(ep.DNSName, ".")[1:], ".")
+	parts := strings.Split(ep.DNSName, ".")
+	if len(parts) < 2 {
+		log.Printf("Invalid DNSName: %s", ep.DNSName)
+		return fmt.Errorf("invalid DNSName: %s", ep.DNSName)
+	}
+	hostname := parts[0]
+	domain := strings.Join(parts[1:], ".")
 	override := opnsense.OpnSenseHostOverride{
 		HostName:    hostname,
 		Domain:      domain,
@@ -165,11 +171,16 @@ func CreateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	log.Printf("Updating entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
 	var uuids []string
-	hostname := strings.Split(ep.DNSName, ".")[0]
-	domain := strings.Join(strings.Split(ep.DNSName, ".")[1:], ".")
+	parts := strings.Split(ep.DNSName, ".")
+	if len(parts) < 2 {
+		log.Printf("Invalid DNSName: %s", ep.DNSName)
+		return fmt.Errorf("invalid DNSName: %s", ep.DNSName)
+	}
+	hostname := parts[0]
+	domain := strings.Join(parts[1:], ".")
 	for _, property := range ep.ProviderSpecific {
 		if property.Name == "uuid" {
-			uuids = strings.Split(property.Value, ",")
+			uuids = strings.Split(property.Value, ";")
 			break
 		}
 	}
@@ -222,8 +233,13 @@ func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 func DeleteEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	log.Printf("Deleting entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
 	var uuids []string
-	hostname := strings.Split(ep.DNSName, ".")[0]
-	domain := strings.Join(strings.Split(ep.DNSName, ".")[1:], ".")
+	parts := strings.Split(ep.DNSName, ".")
+	if len(parts) < 2 {
+		log.Printf("Invalid DNSName: %s", ep.DNSName)
+		return fmt.Errorf("invalid DNSName: %s", ep.DNSName)
+	}
+	hostname := parts[0]
+	domain := strings.Join(parts[1:], ".")
 	for _, property := range ep.ProviderSpecific {
 		if property.Name == "uuid" {
 			uuids = strings.Split(property.Value, ",")
