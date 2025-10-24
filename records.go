@@ -53,15 +53,15 @@ func recordsHandler(w http.ResponseWriter, r *http.Request) {
 
 func ApplyChanges(api *opnsense.OpnSenseApi, changes plan.Changes) []error {
 	var errors []error
-	for _, create := range changes.Create {
-		if err := CreateEntry(api, create); err != nil {
-			log.Printf("Error creating entry %v: %v", create, err)
-			errors = append(errors, err)
-		}
-	}
 	for _, delete := range changes.Delete {
 		if err := DeleteEntry(api, delete); err != nil {
 			log.Printf("Error deleting entry %v: %v", delete, err)
+			errors = append(errors, err)
+		}
+	}
+	for _, create := range changes.Create {
+		if err := CreateEntry(api, create); err != nil {
+			log.Printf("Error creating entry %v: %v", create, err)
 			errors = append(errors, err)
 		}
 	}
@@ -70,6 +70,10 @@ func ApplyChanges(api *opnsense.OpnSenseApi, changes plan.Changes) []error {
 			log.Printf("Error updating entry %v: %v", update, err)
 			errors = append(errors, err)
 		}
+	}
+	if err := api.ApplyChanges(); err != nil {
+		log.Printf("Error applying changes to OPNsense: %v", err)
+		errors = append(errors, err)
 	}
 	return errors
 }
@@ -109,12 +113,8 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 			RecordType: r.Type,
 			Targets:    targets,
 			RecordTTL:  endpoint.TTL(ttl),
-			ProviderSpecific: endpoint.ProviderSpecific{endpoint.ProviderSpecificProperty{
-				Name:  "uuid",
-				Value: r.HostName + "." + r.Domain + "," + r.Uuid,
-			}},
 			Labels: map[string]string{
-				"owner": api.OwnerID,
+				"owner": r.Description,
 			},
 		}
 		endpoints = append(endpoints, &endpoint)
@@ -170,7 +170,6 @@ func CreateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 
 func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	log.Printf("Updating entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
-	var uuids []string
 	parts := strings.Split(ep.DNSName, ".")
 	if len(parts) < 2 {
 		log.Printf("Invalid DNSName: %s", ep.DNSName)
@@ -178,12 +177,6 @@ func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	}
 	hostname := parts[0]
 	domain := strings.Join(parts[1:], ".")
-	for _, property := range ep.ProviderSpecific {
-		if property.Name == "uuid" {
-			uuids = strings.Split(property.Value, ";")
-			break
-		}
-	}
 	override := opnsense.OpnSenseHostOverride{
 		HostName:    hostname,
 		Domain:      domain,
@@ -191,6 +184,11 @@ func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 		TTL:         strconv.FormatInt(int64(ep.RecordTTL), 10),
 		Enabled:     "1",
 		Description: api.OwnerID,
+	}
+	presentOverrides, err := FindOverrides(api, ep.DNSName, ep.RecordType)
+	if err != nil {
+		log.Printf("UpdateEntry: Error finding existing overrides: %v\n", err)
+		return err
 	}
 
 	for _, target := range ep.Targets {
@@ -206,17 +204,23 @@ func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 		default:
 			log.Printf("Record %s is not supported", ep.RecordType)
 		}
-		uuid := ""
-		for _, id := range uuids {
-			parts := strings.Split(id, ",")
-			fqdn := parts[0]
-			uuid = parts[1]
-			if fqdn == ep.DNSName {
-				override.Uuid = uuid
+		// find matching uuid for this fqdn
+		var overrideToUse *opnsense.OpnSenseHostOverride
+		for _, o := range presentOverrides {
+			if (ep.RecordType == endpoint.RecordTypeA || ep.RecordType == endpoint.RecordTypeAAAA) && o.Server == target {
+				overrideToUse = o
+				break
+			} else if ep.RecordType == endpoint.RecordTypeTXT && o.TxtData == target {
+				overrideToUse = o
 				break
 			}
 		}
-		log.Printf("UpdateEntry: Using UUID %s for FQDN %s\n", override.Uuid, ep.DNSName)
+		if overrideToUse == nil {
+			log.Printf("UpdateEntry: No existing override found for target %s of %s Record FQDN %s\n", target, ep.RecordType, ep.DNSName)
+			continue
+		}
+		override.Uuid = overrideToUse.Uuid
+		log.Printf("UpdateEntry: Using UUID %s for %s Record FQDN %s\n", override.Uuid, ep.RecordType, ep.DNSName)
 		ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
 		defer cancel()
 		log.Printf("UpdateEntry: Updating host override: %+v\n", override)
@@ -232,7 +236,6 @@ func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 
 func DeleteEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	log.Printf("Deleting entry: %s %s %v\n", ep.DNSName, ep.RecordType, ep.Targets)
-	var uuids []string
 	parts := strings.Split(ep.DNSName, ".")
 	if len(parts) < 2 {
 		log.Printf("Invalid DNSName: %s", ep.DNSName)
@@ -240,19 +243,17 @@ func DeleteEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	}
 	hostname := parts[0]
 	domain := strings.Join(parts[1:], ".")
-	for _, property := range ep.ProviderSpecific {
-		if property.Name == "uuid" {
-			uuids = strings.Split(property.Value, ",")
-			break
-		}
-	}
 	override := opnsense.OpnSenseHostOverride{
-		HostName:    hostname,
-		Domain:      domain,
-		Type:        ep.RecordType,
-		TTL:         strconv.FormatInt(int64(ep.RecordTTL), 10),
-		Enabled:     "1",
-		Description: api.OwnerID,
+		HostName: hostname,
+		Domain:   domain,
+		Type:     ep.RecordType,
+		TTL:      strconv.FormatInt(int64(ep.RecordTTL), 10),
+		Enabled:  "1",
+	}
+	presentOverrides, err := FindOverrides(api, ep.DNSName, ep.RecordType)
+	if err != nil {
+		log.Printf("UpdateEntry: Error finding existing overrides: %v\n", err)
+		return err
 	}
 
 	for _, target := range ep.Targets {
@@ -268,21 +269,22 @@ func DeleteEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 		default:
 			log.Printf("Record %s is not supported", ep.RecordType)
 		}
-
 		// find matching uuid for this fqdn
-		uuid := ""
-		for _, id := range uuids {
-			parts := strings.Split(id, ",")
-			if len(parts) >= 2 {
-				fqdn := parts[0]
-				uuid = parts[1]
-				if fqdn == ep.DNSName {
-					override.Uuid = uuid
-					break
-				}
+		var overrideToUse *opnsense.OpnSenseHostOverride
+		for _, o := range presentOverrides {
+			if (ep.RecordType == endpoint.RecordTypeA || ep.RecordType == endpoint.RecordTypeAAAA) && o.Server == target {
+				overrideToUse = o
+				break
+			} else if ep.RecordType == endpoint.RecordTypeTXT && o.TxtData == target {
+				overrideToUse = o
+				break
 			}
 		}
-
+		if overrideToUse == nil {
+			log.Printf("UpdateEntry: No existing override found for target %s of %s Record FQDN %s\n", target, ep.RecordType, ep.DNSName)
+			continue
+		}
+		override.Uuid = overrideToUse.Uuid
 		ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
 		defer cancel()
 		log.Printf("DeleteEntry: Deleting host override: %+v\n", override)
@@ -294,6 +296,34 @@ func DeleteEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 	}
 
 	return nil
+}
+
+func FindOverrides(api *opnsense.OpnSenseApi, DNSName string, RecordType string) ([]*opnsense.OpnSenseHostOverride, error) {
+	searchString := strings.Join(strings.Split(DNSName, "."), " ") + " " + api.OwnerID + " " + string(RecordType)
+	log.Printf("FindOverrideUUID: searching for overrides matching endpoint %s with search string '%s'", DNSName, searchString)
+	ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
+	defer cancel()
+	overrides, err := opnsense.SearchHostOverrides(api.WithContext(ctx), searchString)
+	if err != nil {
+		return nil, fmt.Errorf("FindOverrideUUID: error searching host overrides for %s: %v", DNSName, err)
+	}
+	if len(overrides) == 0 {
+		log.Printf("FindOverrideUUID: no overrides found matching endpoint %s", DNSName)
+		return nil, fmt.Errorf("FindOverrideUUID: no overrides found matching endpoint %s", DNSName)
+	}
+	var overridesToReturn []*opnsense.OpnSenseHostOverride
+	for _, o := range overrides {
+		if o.HostName+"."+o.Domain != DNSName {
+			continue
+		}
+		if o.Type != string(RecordType) {
+			continue
+		}
+		// Match found
+		log.Printf("FindOverrideUUID: found matching override with UUID %s for [%s] %s", o.Uuid, RecordType, DNSName)
+		overridesToReturn = append(overridesToReturn, o)
+	}
+	return overridesToReturn, nil
 }
 
 func MergeRecordsWithSameFQDN(records []*endpoint.Endpoint) []*endpoint.Endpoint {
