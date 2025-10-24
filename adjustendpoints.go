@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"external-dns-opnsense/opnsense"
+	"log"
 	"net/http"
 
 	"sigs.k8s.io/external-dns/endpoint"
@@ -17,7 +18,11 @@ func adjustendpointsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var endpoints []*endpoint.Endpoint
-	json.NewDecoder(r.Body).Decode(&endpoints)
+	if err := json.NewDecoder(r.Body).Decode(&endpoints); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
 	adjustedEndpoints, err := AdjustEndpoints(api, endpoints)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -29,10 +34,16 @@ func adjustendpointsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func AdjustEndpoints(api *opnsense.OpnSenseApi, endpoints []*endpoint.Endpoint) ([]*endpoint.Endpoint, error) {
-	var createdEndpoints []*endpoint.Endpoint
-	var error error
-
-	// filter out CNAME Records
-
-	return createdEndpoints, error
+	// Pass through only supported record types; do not drop everything.
+	out := make([]*endpoint.Endpoint, 0, len(endpoints))
+	for _, ep := range endpoints {
+		switch ep.RecordType {
+		case endpoint.RecordTypeA, endpoint.RecordTypeAAAA, endpoint.RecordTypeTXT:
+			out = append(out, ep)
+		default:
+			log.Printf("AdjustEndpoints: skipping unsupported record type %s for %s", ep.RecordType, ep.DNSName)
+		}
+	}
+	log.Printf("AdjustEndpoints: accepted %d of %d endpoints", len(out), len(endpoints))
+	return out, nil
 }
