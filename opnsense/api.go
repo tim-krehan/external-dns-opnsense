@@ -110,7 +110,9 @@ func (api *OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*ht
 		Timeout: api.ApiTimeout, // Match the client timeout to the context timeout
 	}
 
+	// log.Printf("Making %s request to %s", method, u.String())
 	resp, err := client.Do(req)
+	// log.Printf("Received response with status code: %d and length %d", resp.StatusCode, resp.ContentLength)
 
 	if err != nil {
 		if ctx.Err() != nil {
@@ -132,7 +134,9 @@ func (api *OpnSenseApi) ApplyChanges() error {
 	var applyResponse struct {
 		Status string `json:"status"`
 	}
-	resp, err := api.ApiRequest(http.MethodPost, "/unbound/service/reconfigure", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
+	defer cancel()
+	resp, err := api.WithContext(ctx).ApiRequest(http.MethodPost, "/unbound/service/reconfigure", nil)
 	if err != nil {
 		return err
 	}
