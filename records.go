@@ -14,8 +14,6 @@ import (
 	"sigs.k8s.io/external-dns/plan"
 )
 
-const RecordDescriptionPrefix = "Created by external-dns - "
-
 // recordsHandler handles HTTP requests to retrieve or apply DNS records.
 // Supports GET (list records) and POST (apply plan.Changes).
 func recordsHandler(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +103,6 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 		default:
 		}
 
-		ownerId := strings.Replace(r.Description, RecordDescriptionPrefix, "", 1)
 		endpoint := endpoint.Endpoint{
 			DNSName:    r.HostName + "." + r.Domain,
 			RecordType: r.Type,
@@ -116,7 +113,7 @@ func ReadEntries(api *opnsense.OpnSenseApi, searchString string) []*endpoint.End
 				Value: r.HostName + "." + r.Domain + "," + r.Uuid,
 			}},
 			Labels: map[string]string{
-				"owner": ownerId,
+				"owner": api.OwnerID,
 			},
 		}
 		endpoints = append(endpoints, &endpoint)
@@ -136,7 +133,7 @@ func CreateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 		Type:        ep.RecordType,
 		TTL:         strconv.FormatInt(int64(ep.RecordTTL), 10),
 		Enabled:     "1",
-		Description: RecordDescriptionPrefix + ep.Labels["owner"],
+		Description: api.OwnerID,
 	}
 
 	for _, target := range ep.Targets {
@@ -182,7 +179,7 @@ func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 		Type:        ep.RecordType,
 		TTL:         strconv.FormatInt(int64(ep.RecordTTL), 10),
 		Enabled:     "1",
-		Description: RecordDescriptionPrefix + ep.Labels["owner"],
+		Description: api.OwnerID,
 	}
 
 	for _, target := range ep.Targets {
@@ -208,6 +205,7 @@ func UpdateEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 				break
 			}
 		}
+		log.Printf("UpdateEntry: Using UUID %s for FQDN %s\n", override.Uuid, ep.DNSName)
 		ctx, cancel := context.WithTimeout(context.Background(), api.ApiTimeout)
 		defer cancel()
 		log.Printf("UpdateEntry: Updating host override: %+v\n", override)
@@ -238,7 +236,7 @@ func DeleteEntry(api *opnsense.OpnSenseApi, ep *endpoint.Endpoint) error {
 		Type:        ep.RecordType,
 		TTL:         strconv.FormatInt(int64(ep.RecordTTL), 10),
 		Enabled:     "1",
-		Description: RecordDescriptionPrefix + ep.Labels["owner"],
+		Description: api.OwnerID,
 	}
 
 	for _, target := range ep.Targets {
