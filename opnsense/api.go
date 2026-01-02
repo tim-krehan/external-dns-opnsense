@@ -124,10 +124,13 @@ func (api *OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*ht
 	return resp, nil
 }
 
-// WithContext creates a copy of the OpnSenseApi with the specified context.
+// WithContext returns a shallow copy of OpnSenseApi with the provided context.
+// This avoids mutating the original instance, which can lead to race conditions
+// when the same API object is reused across concurrent requests.
 func (api *OpnSenseApi) WithContext(ctx context.Context) *OpnSenseApi {
-	api.Ctx = ctx
-	return api
+	copy := *api
+	copy.Ctx = ctx
+	return &copy
 }
 
 func (api *OpnSenseApi) ApplyChanges() error {
