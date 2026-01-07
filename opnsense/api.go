@@ -2,6 +2,7 @@ package opnsense
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -27,6 +28,7 @@ func LoadConfigFromEnv() *OpnSenseApi {
 	envApiTimeout := os.Getenv("OPNSENSE_API_TIMEOUT")
 	domainFilter := strings.Split(os.Getenv("DOMAIN_FILTER"), ",")
 	ownerId := os.Getenv("EXTERNAL_DNS_OWNER")
+	tlsVerifyStr := os.Getenv("OPNSENSE_API_TLS_VERIFY")
 
 	missingConfig := false
 	missingConfigParams := []string{}
@@ -58,6 +60,10 @@ func LoadConfigFromEnv() *OpnSenseApi {
 		log.Printf("EXTERNAL_DNS_OWNER not set, using default value 'default'")
 		ownerId = "default"
 	}
+	if tlsVerifyStr == "" {
+		log.Printf("OPNSENSE_API_TLS_VERIFY not set, defaulting to true")
+		tlsVerifyStr = "true"
+	}
 
 	log.Printf("Using OpnSense API Host: %s", apiHost)
 	log.Printf("With Timeout: %s", timeout.String())
@@ -70,6 +76,7 @@ func LoadConfigFromEnv() *OpnSenseApi {
 		ApiTimeout:      timeout,
 		DNSDomainFilter: domainFilter,
 		OwnerID:         ownerId,
+		TLSVerify:       strings.ToLower(tlsVerifyStr) == "true",
 	}
 	return &api
 }
@@ -106,8 +113,15 @@ func (api *OpnSenseApi) ApiRequest(method, endpoint string, body io.Reader) (*ht
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	clientTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: !api.TLSVerify,
+		},
+	}
+
 	client := &http.Client{
-		Timeout: api.ApiTimeout, // Match the client timeout to the context timeout
+		Transport: clientTransport,
+		Timeout:   api.ApiTimeout, // Match the client timeout to the context timeout
 	}
 
 	// log.Printf("Making %s request to %s", method, u.String())

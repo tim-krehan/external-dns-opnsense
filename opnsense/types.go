@@ -29,4 +29,5 @@ type OpnSenseApi struct {
 	ApiTimeout      time.Duration
 	OwnerID         string
 	DNSDomainFilter []string
+	TLSVerify       bool
 }
