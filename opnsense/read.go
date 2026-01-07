@@ -20,13 +20,18 @@ func (override *OpnSenseHostOverride) Read(api *OpnSenseApi) error {
 			return fmt.Errorf("Read: No host override found for %s.%s", override.HostName, override.Domain)
 		}
 		if len(foundOverrides) > 1 {
+			matchingOverrides := 0
 			for _, o := range foundOverrides {
 				if o.HostName == override.HostName && o.Domain == override.Domain {
-					override.Uuid = o.Uuid
-					return override.GetByUUID(api)
+					matchingOverrides++
 				}
 			}
-			return fmt.Errorf("Read: Multiple host overrides found for %s.%s", override.HostName, override.Domain)
+			if matchingOverrides == 1 {
+				override.Uuid = foundOverrides[0].Uuid
+				return override.GetByUUID(api)
+			} else {
+				return fmt.Errorf("Read: Multiple host overrides found for %s.%s", override.HostName, override.Domain)
+			}
 		}
 		override.Uuid = foundOverrides[0].Uuid
 		return override.GetByUUID(api)
